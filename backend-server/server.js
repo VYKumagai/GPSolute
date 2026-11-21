@@ -1,40 +1,34 @@
-// server.js
-const { WebSocketServer } = require('ws');
+const WebSocket = require('ws');
+const dgram = require('dgram');
 
-// Creamos el servidor en el puerto 8080
-const wss = new WebSocketServer({ port: 8080 });
-console.log("🚀 Servidor GPS Local corriendo en el puerto 8080");
+const wss = new WebSocket.Server({ port: 8080 });
+console.log('🚀 Servidor GPS Local corriendo en el puerto 8080');
 
-// Guardamos la última ubicación conocida en la memoria de la laptop
-let ultimaUbicacion = null;
+// Servidor de autodescubrimiento DHCP en red local (puerto UDP 41234)
+const udpServer = dgram.createSocket('udp4');
+udpServer.on('message', (msg, rinfo) => {
+  if (msg.toString() === 'DISCOVER_GPSOLUTE') {
+    const reply = Buffer.from('GPSOLUTE_HERE');
+    udpServer.send(reply, rinfo.port, rinfo.address);
+  }
+});
+udpServer.bind(41234);
 
 wss.on('connection', (ws) => {
-  console.log("📱 Dispositivo conectado al servidor local");
-
-  // Si ya hay una ubicación guardada, se la enviamos de inmediato al nuevo monitor
-  if (ultimaUbicacion) {
-    ws.send(JSON.stringify(ultimaUbicacion));
-  }
+  console.log('Nuevo dispositivo conectado');
 
   ws.on('message', (message) => {
-    try {
-      const datos = JSON.parse(message);
-      
-      if (datos.tipo === 'EMITIR_GPS') {
-        ultimaUbicacion = datos.coordenadas;
-        console.log(`🛰️ Ubicación recibida del carro -> Lat: ${ultimaUbicacion.latitude}, Lng: ${ultimaUbicacion.longitude}`);
+    const data = message.toString();
+    console.log('Coordenadas recibidas:', data);
 
-        // Reenviar la ubicación a todos los demás dispositivos conectados (Monitores)
-        wss.clients.forEach((client) => {
-          if (client !== ws && client.readyState === 1) {
-            client.send(JSON.stringify(ultimaUbicacion));
-          }
-        });
+    wss.clients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(data);
       }
-    } catch (e) {
-      console.error("Error al procesar mensaje:", e);
-    }
+    });
   });
 
-  ws.on('close', () => console.log("❌ Dispositivo desconectado"));
+  ws.on('close', () => {
+    console.log('Dispositivo desconectado');
+  });
 });
